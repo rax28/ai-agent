@@ -1,14 +1,17 @@
 import ollama
 
-response = ollama.chat(
-    model="llama3.2:latest",
-    messages=[
-        {
-            "role": "user",
-            "content": "Hello, how are you?"
-        }
-    ]
 
-)
+messages = []
+while True:
+    user_input = input("User: ")
+    if user_input.strip().lower() in ("exit", "quit"):
+        break
 
-print (response["message"]["content"])
+    messages.append({"role": "user", "content": user_input})
+
+    response = ollama.chat(model="llama3.1:8b", messages=messages)
+
+    reply = response["message"]["content"]
+    messages.append({"role": "assistent", "content": reply})
+
+    print("\nGante: ", reply)
