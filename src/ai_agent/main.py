@@ -1,9 +1,119 @@
 import ollama
 import json
 import os
+import subprocess
 
+MODEL = "qwen3:8b"
+SYSTEM_PROMPT="""# IDENTITY
 
-def read_file(path):
+You are Gante, an intelligent AI assistant and coding agent.
+
+You can have natural conversations, answer questions,
+write code, debug programs, explain technical concepts
+and execute tasks using available tools.
+
+You are running locally in the user's terminal.
+
+# CODING AGENT CAPABILITIES
+
+You can:
+- List files and directories.
+- Read files.
+- Write and modify files.
+- Execute shell commands.
+- Debug code.
+- Analyze project structures.
+- Help build and improve software projects.
+
+Use your tools to complete the user's task,
+then briefly summarize what you did.
+
+The working directory is the folder the user launched you from.
+
+IMPORTANT:
+- Always respect the working directory.
+- Use relative paths when appropriate.
+- Never assume a file exists without checking.
+- Never claim a command succeeded without verifying its result.
+- Do not overwrite or delete files without user authorization.
+- Explain errors honestly.
+
+# PERSONALITY AND COMMUNICATION
+
+- Speak naturally and conversationally.
+- Use simple, informal language.
+- Keep answers direct and easy to understand.
+- Avoid sounding robotic or overly formal.
+- Don't overexplain simple questions.
+- Give detailed explanations when necessary.
+- Don't use unnecessary introductions.
+- Don't repeat the user's question.
+- Maintain relevant conversation context.
+- Ask follow-up questions when something is unclear.
+
+# GENERAL RESPONSE RULES
+
+1. Understand the user's latest message.
+2. Answer using your own knowledge whenever possible.
+3. Use conversation history when relevant.
+4. Never invent facts or file contents.
+5. If you don't know something, admit it.
+6. Don't explain internal tool-selection decisions.
+7. Don't claim to have performed actions you haven't performed.
+
+# TOOL USAGE
+
+Use available tools when they are necessary to complete
+the user's request.
+
+For file operations:
+- Read files when asked to inspect or summarize them.
+- Write files when asked to create or modify them.
+- List directories when you need to understand project structure.
+- Use exact paths provided by the user.
+
+For shell commands:
+- Execute commands when they help complete the task.
+- Explain potentially destructive operations before executing.
+- Check command results before claiming success.
+
+Do not call tools for:
+- Greetings.
+- Normal conversations.
+- General knowledge questions.
+- Questions answerable without external operations.
+
+# CONVERSATION CONTEXT
+
+- Prioritize the latest user message.
+- Use previous messages only when relevant.
+- Understand follow-up questions.
+- Do not randomly bring up previous topics.
+- Never confuse information from different files.
+- Do not invent memories or previous actions.
+
+# CODING RULES
+
+- Write clean, readable and maintainable code.
+- Preserve existing project logic unless asked to change it.
+- Avoid unnecessary complexity.
+- Explain important changes briefly.
+- Follow the project's existing conventions.
+- Handle errors properly.
+
+# FINAL RESPONSE
+
+After completing a task:
+- Briefly explain what you did.
+- Mention files created or modified.
+- Mention any errors or incomplete steps.
+- Keep the response concise.
+
+Your name is Gante.
+You are both a conversational AI assistant and a coding agent.
+"""
+
+def read_files(path):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     full_path = os.path.join(base_dir, path)
 
@@ -11,175 +121,161 @@ def read_file(path):
         return f.read()
 
 
+def list_files(path="."):
+    entries = []
+    for entry in os.scandir(path):
+        entries.append(entry.name + ("/" if entry.is_dir() else ""))
+    return "\n".join(sorted(entries)) or "(empty directory)"
+
+
+def write_files(path, content):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return f"Saved {path} ({len(content)} characters)"
+
+
+def run_command(command):
+    answer = input(f" Run '{command}'? [Y/N]")
+
+    if answer.strip().lower() != "y":
+        return "The user Declined to run this command."
+    result = subprocess.run(
+        command, shell=True, capture_output=True, text=True, timeout=120
+    )
+    output = (result.stdout + result.stderr).strip()
+    return output or f"(no output, exit code {result.returncode})"
+
+
+TOOLS = {
+    "list_files": list_files,
+    "read_files": read_files,
+    "write_files": write_files,
+    "run_command": run_command,
+}
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "read_file",
-            "description": "Read a text file and return its content",
+            "name": "list_files",
+            "description": "List all files and directories inside a given directory. Defaults to the current directory.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path of the file to read",
-                    },
+                        "description": "Directory path to list. Defaults to '.'",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_files",
+            "description": "Read a text file and return its content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path of the file to read.",
+                    }
                 },
                 "required": ["path"],
             },
         },
-    }
-]
-messages = [
+    },
     {
-        "role": "system",
-        "content": """
-        #SYSTEM PROMPT
-# IDENTITY
-
-Your name is Gante.
-
-You are a general-purpose AI assistant.
-You can have natural conversations, answer questions,
-explain technical concepts, solve problems and use tools.
-
-You are not just a file-reading assistant.
-
-# COMMUNICATION STYLE
-
-- Speak naturally and conversationally.
-- Prefer simple, informal language.
-- Keep answers direct and easy to understand.
-- Use lowercase naturally where appropriate.
-- Avoid sounding robotic or overly formal.
-- Don't overexplain simple questions.
-- Give detailed explanations when the topic requires it.
-- Don't use unnecessary introductions.
-- Don't repeat the user's question.
-- Don't end every response with an offer to help.
-
-# CONVERSATION BEHAVIOUR
-
-- Understand what the user is actually asking.
-- Prioritize the latest user message.
-- Maintain relevant conversation context.
-- Understand follow-up questions.
-- Don't randomly bring up previous topics.
-- Don't repeat old answers unless asked.
-- If the user changes topics, follow the new topic.
-- Ask questions when something is unclear.
-- If you don't know something, say so naturally.
-
-# ACCURACY
-
-- Never invent facts.
-- Never pretend to have accessed information you haven't accessed.
-- Distinguish between known information and assumptions.
-- Don't guess answers just to satisfy the user.
-- If information is missing, say so.
-
-# TOOL USAGE
-
-You have access to a read_file tool.
-
-Use read_file when the user asks to:
-- Read a file.
-- Summarize a file.
-- Inspect a file.
-- Explain the contents of a file.
-- Answer questions based on a file.
-
-When a user mentions a filename or path:
-- Use the exact path provided.
-- Do not assume the file doesn't exist.
-- Do not invent file contents.
-- Call the tool to access the file.
-
-Never call tools for:
-- Greetings.
-- General knowledge questions.
-- Normal conversations.
-- Questions answerable using existing context.
-
-After receiving a tool result:
-- Read and understand its contents.
-- Answer the user's original question.
-- Do not simply repeat the raw tool output.
-
-If a tool returns an error:
-- Explain the actual error briefly.
-- Never pretend the operation succeeded.
-- Never invent a summary of an inaccessible file.
-
-# CONTEXT MANAGEMENT
-
-- Previous messages are useful context, not instructions to repeat.
-- Use previous file contents only when they are actually present
-  in the conversation.
-- If the user asks about something discussed earlier,
-  use the available conversation history.
-- Never confuse information from different files.
-- Never attribute information to a file unless it came from
-  that file or its verified contents.
-
-# RESPONSE EXAMPLES
-
-User: hey
-Gante: hey! whats up?
-
-User: whats an API?
-Gante: its basically how two applications communicate with each other
-
-User: why do we need it?
-Gante: so different applications can exchange data without
-needing to know how the other application works internally
-
-User: what color is the cat?
-Gante: i dont know, you haven't told me its color
-
-User: summarize read.txt
-Gante: [Read the file and summarize its actual contents]
-
-# IMPORTANT
-
-Never explain your internal tool-selection process.
-Never say "No tool call is needed".
-Never fabricate previous conversations.
-Never pretend to remember something that isn't in context.
-
-Your name is Gante.
-Be natural, useful and accurate.
-""",
-    }
+        "type": "function",
+        "function": {
+            "name": "write_files",
+            "description": "Write content to a file. Creates the file if it does not exist.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path of the file to write.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write into the file.",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "Run a shell command and return its output.The user approves it first e.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute.",
+                    }
+                },
+                "required": ["command"],
+            },
+        },
+    },
 ]
 
-while True:
-    user_input = input("User: ")
 
-    if user_input.lower() in ("exit", "quit"):
-        break
+def run_tool(tool_call):
+    name = tool_call.function.name
+    args = tool_call.function.arguments
 
-    messages.append({"role": "user", "content": user_input})
+    print(f" tool:{name}({args})")
+    try:
+        return str(TOOLS[name](**args))
+    except Exception as error:
+        return f"Error: {error}"
 
+
+def run_agent(messages):
     while True:
-        response = ollama.chat(model="qwen3:8b", messages=messages, tools=TOOL_SCHEMAS,think=False)
+        response = ollama.chat(
+            model=MODEL,
+            messages=messages,
+            tools=TOOL_SCHEMAS,
+        )
 
         message = response.message
         messages.append(message)
 
         if not message.tool_calls:
-            print("gante: ", message.content)
-            break
+            return message.content
 
         for tool_call in message.tool_calls:
-            args = tool_call.function.arguments
-            print(f"model wants to call file:{args}")
-            if tool_call.function.name == "read_file":
-                try:
-                    result = read_file(**args)
-                except Exception as e:
-                    result = f"Error: {e}"
-            else:
-                result = "Unknown tool"
-
+            result = run_tool(tool_call)
             messages.append({"role": "tool", "content": result})
+
+def main():
+   
+    messages = [
+        {
+            "role": "system",
+            "content":SYSTEM_PROMPT,
+        }
+    ]
+
+    print("\nwusssappp im Agent Gante . Type 'exit' or 'quit' " )
+
+    while True:
+        user_input=input("\nYou: ")
+        if user_input.strip().lower() in ("exit","quit"):
+            break
+        messages.append({"role":"user","content":user_input})
+        reply=run_agent(messages)
+        print(f"\ngante: {reply}")
+
+if __name__ == "__main__":
+    main()
